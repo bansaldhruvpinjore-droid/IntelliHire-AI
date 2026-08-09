@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..schemas.profile import ProfileUpdate, ProfileResponse
 
 from ..models.user import User
 from ..services.security import (
@@ -36,3 +39,15 @@ def recruiter_test(
         "user_id": current_user.id,
         "role": current_user.role
     }
+@router.put("/profile", response_model=ProfileResponse)
+def update_profile(
+    profile: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    current_user.phone = profile.phone
+
+    db.commit()
+    db.refresh(current_user)
+
+    return current_user
