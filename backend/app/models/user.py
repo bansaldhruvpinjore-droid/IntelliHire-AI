@@ -35,3 +35,4 @@ class User(Base):
         Boolean,
         default=True
     )
+    phone = Column(String, nullable=True)

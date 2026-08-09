@@ -4,6 +4,7 @@ from sqlalchemy import text
 from .database import Base, engine
 from .models.user import User
 from .routes.auth import router as auth_router
+from .routes.users import router as users_router
 
 
 # Create database tables
@@ -17,6 +18,7 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(users_router)
 
 @app.get("/")
 def home():
