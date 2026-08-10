@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, Integer, String
-
+from sqlalchemy.orm import relationship
 from ..database import Base
 
 
@@ -36,3 +36,8 @@ class User(Base):
         default=True
     )
     phone = Column(String, nullable=True)
+    resumes = relationship(
+    "Resume",
+    back_populates="user",
+    cascade="all, delete-orphan"
+    )
