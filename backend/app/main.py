@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from app.routes import resumes
 
 from .database import Base, engine
 from .models.user import User
@@ -19,7 +20,7 @@ app = FastAPI(
 
 app.include_router(auth_router)
 app.include_router(users_router)
-
+app.include_router(resumes.router)
 @app.get("/")
 def home():
     return {
