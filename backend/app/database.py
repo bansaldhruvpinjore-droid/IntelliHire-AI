@@ -35,7 +35,11 @@ if not DATABASE_URL:
 # --------------------------------------------------
 
 engine = create_engine(
-    DATABASE_URL,
+    DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1
+    ),
     pool_pre_ping=True
 )
 

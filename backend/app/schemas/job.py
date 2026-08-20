@@ -25,4 +25,18 @@ class JobResponse(BaseModel):
 
     class Config:
         from_attributes = True
+class JobMatchResponse(BaseModel):
+    resume_id: int
+    resume_filename: str
+
+    job_id: int
+    job_title: str
+    company: str
+
+    match_score: int
+
+    matched_skills: list[str]
+    missing_skills: list[str]
+
+    recommendation: str
         

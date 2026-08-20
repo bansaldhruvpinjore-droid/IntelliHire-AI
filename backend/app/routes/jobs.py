@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.job import Job
 from ..models.user import User
-from ..schemas.job import JobCreate, JobResponse
+from ..schemas.job import JobCreate, JobResponse, JobMatchResponse
 from ..services.security import get_current_user, require_role
+from ..models.resume import Resume
+from ..services.job_matcher import calculate_match
 
 
 router = APIRouter(
@@ -51,3 +53,80 @@ def get_jobs(
     )
 
     return jobs
+@router.get(
+    "/{job_id}/match/{resume_id}",
+    response_model=JobMatchResponse
+)
+def match_resume_to_job(
+    job_id: int,
+    resume_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    from fastapi import HTTPException
+
+    # Find job
+    job = db.query(Job).filter(Job.id == job_id).first()
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+
+    # Find resume belonging to current user
+    resume = (
+        db.query(Resume)
+        .filter(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume not found"
+        )
+
+    # Make sure resume text exists
+    if not resume.extracted_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Resume text has not been extracted"
+        )
+
+    # Calculate match
+    result = calculate_match(
+        resume.extracted_text,
+        job.required_skills
+    )
+
+    # Generate recommendation
+    score = result["match_score"]
+
+    if score >= 80:
+        recommendation = "Strong Match"
+    elif score >= 60:
+        recommendation = "Good Match"
+    elif score >= 40:
+        recommendation = "Partial Match"
+    else:
+        recommendation = "Low Match"
+
+    return {
+        "resume_id": resume.id,
+        "resume_filename": resume.filename,
+
+        "job_id": job.id,
+        "job_title": job.title,
+        "company": job.company,
+
+        "match_score": score,
+
+        "matched_skills": result["matched_skills"],
+        "missing_skills": result["missing_skills"],
+
+        "recommendation": recommendation
+    }
