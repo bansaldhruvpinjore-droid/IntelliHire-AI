@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.job import Job
+from ..models.resume import Resume
 from ..models.user import User
 from ..schemas.job import JobCreate, JobResponse, JobMatchResponse
 from ..services.security import get_current_user, require_role
-from ..models.resume import Resume
 from ..services.job_matcher import calculate_match
 
 
@@ -42,7 +42,12 @@ def create_job(
     db.refresh(job)
 
     return job
-@router.get("/", response_model=list[JobResponse])
+
+
+@router.get(
+    "/",
+    response_model=list[JobResponse]
+)
 def get_jobs(
     db: Session = Depends(get_db)
 ):
@@ -53,6 +58,8 @@ def get_jobs(
     )
 
     return jobs
+
+
 @router.get(
     "/{job_id}/match/{resume_id}",
     response_model=JobMatchResponse
@@ -63,18 +70,20 @@ def match_resume_to_job(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    from fastapi import HTTPException
+    # Find the job
+    job = (
+        db.query(Job)
+        .filter(Job.id == job_id)
+        .first()
+    )
 
-    # Find job
-    job = db.query(Job).filter(Job.id == job_id).first()
-
-    if not job:
+    if job is None:
         raise HTTPException(
             status_code=404,
             detail="Job not found"
         )
 
-    # Find resume belonging to current user
+    # Find the resume belonging to the current user
     resume = (
         db.query(Resume)
         .filter(
@@ -84,7 +93,7 @@ def match_resume_to_job(
         .first()
     )
 
-    if not resume:
+    if resume is None:
         raise HTTPException(
             status_code=404,
             detail="Resume not found"
@@ -100,7 +109,7 @@ def match_resume_to_job(
     # Calculate match
     result = calculate_match(
         resume.extracted_text,
-        job.required_skills
+        job.required_skills or ""
     )
 
     # Generate recommendation
@@ -118,15 +127,11 @@ def match_resume_to_job(
     return {
         "resume_id": resume.id,
         "resume_filename": resume.filename,
-
         "job_id": job.id,
         "job_title": job.title,
         "company": job.company,
-
         "match_score": score,
-
         "matched_skills": result["matched_skills"],
         "missing_skills": result["missing_skills"],
-
         "recommendation": recommendation
     }

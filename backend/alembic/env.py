@@ -16,11 +16,7 @@ sys.path.append(
 )
 
 load_dotenv(
-    os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        ".env"
-    )
+    os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 )
 from app.database import Base
 from app.models.user import User

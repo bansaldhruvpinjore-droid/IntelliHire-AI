@@ -25,6 +25,8 @@ class JobResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
 class JobMatchResponse(BaseModel):
     resume_id: int
     resume_filename: str
@@ -39,4 +41,3 @@ class JobMatchResponse(BaseModel):
     missing_skills: list[str]
 
     recommendation: str
-        
