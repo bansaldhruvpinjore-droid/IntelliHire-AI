@@ -8,6 +8,7 @@ from .routes.auth import router as auth_router
 from .routes.users import router as users_router
 from app.routes import jobs
 from app.routes.applications import router as applications_router
+from app.routes.notifications import router as notifications_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -19,12 +20,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(resumes.router)
-app.include_router(jobs.router)
-app.include_router(applications_router)
-
+for router in [
+    auth_router,
+    users_router,
+    resumes.router,
+    jobs.router,
+    applications_router,
+    notifications_router
+]:
+    app.include_router(router)
 @app.get("/")
 def home():
     return {
@@ -50,11 +54,3 @@ def database_health():
             "status": "error",
             "message": str(e)
         }
-class RecruiterDashboardResponse(BaseModel):
-    total_jobs: int
-    total_applications: int
-    applied: int
-    shortlisted: int
-    interview: int
-    selected: int
-    rejected: int

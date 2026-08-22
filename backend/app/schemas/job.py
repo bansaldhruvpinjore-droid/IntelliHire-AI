@@ -41,3 +41,13 @@ class JobMatchResponse(BaseModel):
     missing_skills: list[str]
 
     recommendation: str
+class JobRecommendationResponse(BaseModel):
+    job_id: int
+    title: str
+    company: str
+    location: str
+
+    match_score: int
+    matched_skills: list[str]
+    missing_skills: list[str]
+    recommendation: str

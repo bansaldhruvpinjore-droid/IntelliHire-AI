@@ -20,6 +20,7 @@ load_dotenv(
 )
 from app.database import Base
 from app.models.user import User
+from app.models.notification import Notification
 
 target_metadata = Base.metadata
 

@@ -6,16 +6,19 @@ from app.models.application import Application
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user import User
+from app.models.notification import Notification
 from app.schemas.application import (
     ApplicationCreate,
     ApplicationResponse,
     ApplicationStatusUpdate,
     RecruiterApplicationResponse,
     MyApplicationResponse,
-    RecruiterDashboardResponse
+    RecruiterDashboardResponse,
+    RecruiterMatchAnalyticsResponse
 )
 from app.services.job_matcher import calculate_match
 from app.services.security import get_current_user
+
 
 
 router = APIRouter(
@@ -263,7 +266,22 @@ def update_application_status(
             detail="Invalid application status"
         )
 
+    old_status = application.status
+
     application.status = status_data.status
+
+    notification = Notification(
+        user_id=application.applicant_id,
+        application_id=application.id,
+        title="Application Status Updated",
+        message=(
+            f"Your application for '{job.title}' "
+            f"has been updated from '{old_status}' "
+            f"to '{status_data.status}'."
+        )
+    ) 
+
+    db.add(notification)
 
     db.commit()
     db.refresh(application)
@@ -323,3 +341,155 @@ def get_recruiter_dashboard(
         "selected": status_counts["selected"],
         "rejected": status_counts["rejected"]
     }
+@router.get(
+    "/analytics/match",
+    response_model=RecruiterMatchAnalyticsResponse
+)
+def get_match_analytics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    jobs = (
+        db.query(Job)
+        .filter(Job.recruiter_id == current_user.id)
+        .all()
+    )
+
+    job_ids = [job.id for job in jobs]
+
+    if not job_ids:
+        return {
+            "total_applications": 0,
+            "strong_matches": 0,
+            "good_matches": 0,
+            "partial_matches": 0,
+            "low_matches": 0
+        }
+
+    applications = (
+        db.query(Application)
+        .filter(Application.job_id.in_(job_ids))
+        .all()
+    )
+
+    strong_matches = 0
+    good_matches = 0
+    partial_matches = 0
+    low_matches = 0
+
+    for application in applications:
+        job = application.job
+        resume = application.resume
+
+        if not job or not resume or not resume.extracted_text:
+            low_matches += 1
+            continue
+
+        match_result = calculate_match(
+            resume.extracted_text,
+            job.required_skills or ""
+        )
+
+        score = match_result["match_score"]
+
+        if score >= 80:
+            strong_matches += 1
+        elif score >= 60:
+            good_matches += 1
+        elif score >= 40:
+            partial_matches += 1
+        else:
+            low_matches += 1
+
+    return {
+        "total_applications": len(applications),
+        "strong_matches": strong_matches,
+        "good_matches": good_matches,
+        "partial_matches": partial_matches,
+        "low_matches": low_matches
+    }
+@router.get(
+    "/job/{job_id}/ranked",
+    response_model=list[RecruiterApplicationResponse]
+)
+def get_ranked_job_applications(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    job = (
+        db.query(Job)
+        .filter(
+            Job.id == job_id,
+            Job.recruiter_id == current_user.id
+        )
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found or you are not the recruiter of this job"
+        )
+
+    applications = (
+        db.query(Application)
+        .filter(Application.job_id == job_id)
+        .all()
+    )
+
+    results = []
+
+    for application in applications:
+        resume = application.resume
+
+        if not resume or not resume.extracted_text:
+            results.append({
+                "application_id": application.id,
+                "applicant_id": application.applicant_id,
+                "resume_id": application.resume_id,
+                "resume_filename": resume.filename if resume else "Unknown",
+                "status": application.status,
+                "applied_at": application.applied_at,
+                "match_score": 0,
+                "matched_skills": [],
+                "missing_skills": [],
+                "recommendation": "Resume text unavailable"
+            })
+            continue
+
+        match_result = calculate_match(
+            resume.extracted_text,
+            job.required_skills or ""
+        )
+
+        score = match_result["match_score"]
+
+        if score >= 80:
+            recommendation = "Strong Match"
+        elif score >= 60:
+            recommendation = "Good Match"
+        elif score >= 40:
+            recommendation = "Partial Match"
+        else:
+            recommendation = "Low Match"
+
+        results.append({
+            "application_id": application.id,
+            "applicant_id": application.applicant_id,
+            "resume_id": application.resume_id,
+            "resume_filename": resume.filename,
+            "status": application.status,
+            "applied_at": application.applied_at,
+            "match_score": score,
+            "matched_skills": match_result["matched_skills"],
+            "missing_skills": match_result["missing_skills"],
+            "recommendation": recommendation
+        })
+
+    results.sort(
+        key=lambda application: application["match_score"],
+        reverse=True
+    )
+
+    return results

@@ -1,11 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.job import Job
 from ..models.resume import Resume
 from ..models.user import User
-from ..schemas.job import JobCreate, JobResponse, JobMatchResponse
+from ..schemas.job import (
+    JobCreate,
+    JobResponse,
+    JobMatchResponse,
+    JobRecommendationResponse
+)
 from ..services.security import get_current_user, require_role
 from ..services.job_matcher import calculate_match
 
@@ -135,3 +140,106 @@ def match_resume_to_job(
         "missing_skills": result["missing_skills"],
         "recommendation": recommendation
     }
+@router.get(
+    "/search",
+    response_model=list[JobResponse]
+)
+def search_jobs(
+    keyword: str | None = Query(default=None),
+    location: str | None = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Job)
+
+    if keyword:
+        search_term = f"%{keyword}%"
+
+        query = query.filter(
+            (Job.title.ilike(search_term)) |
+            (Job.company.ilike(search_term)) |
+            (Job.description.ilike(search_term)) |
+            (Job.required_skills.ilike(search_term))
+        )
+
+    if location:
+        query = query.filter(
+            Job.location.ilike(f"%{location}%")
+        )
+
+    return (
+        query
+        .order_by(Job.id.desc())
+        .all()
+    )
+@router.get(
+    "/recommended/{resume_id}",
+    response_model=list[JobRecommendationResponse]
+)
+def get_recommended_jobs(
+    resume_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    resume = (
+        db.query(Resume)
+        .filter(
+            Resume.id == resume_id,
+            Resume.user_id == current_user.id
+        )
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume not found"
+        )
+
+    if not resume.extracted_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Resume text has not been extracted"
+        )
+
+    jobs = (
+        db.query(Job)
+        .order_by(Job.id.desc())
+        .all()
+    )
+
+    recommendations = []
+
+    for job in jobs:
+        match_result = calculate_match(
+            resume.extracted_text,
+            job.required_skills or ""
+        )
+
+        score = match_result["match_score"]
+
+        if score >= 80:
+            recommendation = "Strong Match"
+        elif score >= 60:
+            recommendation = "Good Match"
+        elif score >= 40:
+            recommendation = "Partial Match"
+        else:
+            recommendation = "Low Match"
+
+        recommendations.append({
+            "job_id": job.id,
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "match_score": score,
+            "matched_skills": match_result["matched_skills"],
+            "missing_skills": match_result["missing_skills"],
+            "recommendation": recommendation
+        })
+
+    recommendations.sort(
+        key=lambda job: job["match_score"],
+        reverse=True
+    )
+
+    return recommendations

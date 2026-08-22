@@ -58,3 +58,9 @@ class RecruiterDashboardResponse(BaseModel):
     interview: int
     selected: int
     rejected: int
+class RecruiterMatchAnalyticsResponse(BaseModel):
+    total_applications: int
+    strong_matches: int
+    good_matches: int
+    partial_matches: int
+    low_matches: int
