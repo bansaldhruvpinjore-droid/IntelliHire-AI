@@ -63,6 +63,25 @@ async def upload_resume(
         "filename": resume.filename,
         "file_path": resume.file_path
     }
+@router.get("/")
+def get_my_resumes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    resumes = (
+        db.query(Resume)
+        .filter(Resume.user_id == current_user.id)
+        .order_by(Resume.id.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": resume.id,
+            "filename": resume.filename
+        }
+        for resume in resumes
+    ]
 @router.get(
     "/{resume_id}/analysis",
     response_model=ResumeAnalysisResponse

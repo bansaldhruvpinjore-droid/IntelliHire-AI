@@ -64,3 +64,33 @@ class RecruiterMatchAnalyticsResponse(BaseModel):
     good_matches: int
     partial_matches: int
     low_matches: int
+class CandidateDashboardResponse(BaseModel):
+    total_applications: int
+    applied: int
+    shortlisted: int
+    interview: int
+    selected: int
+    rejected: int
+    unread_notifications: int
+class ApplicationStatusHistoryResponse(BaseModel):
+    id: int
+    application_id: int
+    old_status: str | None
+    new_status: str
+    changed_by: int
+    changed_at: datetime
+
+    class Config:
+        from_attributes = True
+class ApplicationTimelineEvent(BaseModel):
+    event: str
+    status: str
+    timestamp: datetime
+class CandidateDashboardResponse(BaseModel):
+    total_applications: int
+    applied: int
+    shortlisted: int
+    interview: int
+    selected: int
+    rejected: int
+    unread_notifications: int

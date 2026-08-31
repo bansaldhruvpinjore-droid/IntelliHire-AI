@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.application import Application
+from app.models.application_status_history import ApplicationStatusHistory
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user import User
@@ -14,7 +15,10 @@ from app.schemas.application import (
     RecruiterApplicationResponse,
     MyApplicationResponse,
     RecruiterDashboardResponse,
-    RecruiterMatchAnalyticsResponse
+    RecruiterMatchAnalyticsResponse,
+    CandidateDashboardResponse,
+    ApplicationStatusHistoryResponse,
+    ApplicationTimelineEvent
 )
 from app.services.job_matcher import calculate_match
 from app.services.security import get_current_user
@@ -215,6 +219,52 @@ def get_my_applications(
         })
 
     return results
+@router.get(
+    "/candidate-dashboard",
+    response_model=CandidateDashboardResponse
+)
+def get_candidate_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    applications = (
+        db.query(Application)
+        .filter(
+            Application.applicant_id == current_user.id
+        )
+        .all()
+    )
+
+    status_counts = {
+        "applied": 0,
+        "shortlisted": 0,
+        "interview": 0,
+        "selected": 0,
+        "rejected": 0
+    }
+
+    for application in applications:
+        if application.status in status_counts:
+            status_counts[application.status] += 1
+
+    unread_notifications = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == current_user.id,
+            Notification.is_read == False
+        )
+        .count()
+    )
+
+    return {
+        "total_applications": len(applications),
+        "applied": status_counts["applied"],
+        "shortlisted": status_counts["shortlisted"],
+        "interview": status_counts["interview"],
+        "selected": status_counts["selected"],
+        "rejected": status_counts["rejected"],
+        "unread_notifications": unread_notifications
+    }
 @router.patch(
     "/{application_id}/status",
     response_model=ApplicationResponse
@@ -270,16 +320,21 @@ def update_application_status(
 
     application.status = status_data.status
 
+    history = ApplicationStatusHistory(
+        application_id=application.id,
+        old_status=old_status,
+        new_status=status_data.status,
+        changed_by=current_user.id
+    )
+
+    db.add(history)
     notification = Notification(
         user_id=application.applicant_id,
         application_id=application.id,
         title="Application Status Updated",
-        message=(
-            f"Your application for '{job.title}' "
-            f"has been updated from '{old_status}' "
-            f"to '{status_data.status}'."
-        )
-    ) 
+        message=f"Your application status has been changed from "
+                f"{old_status} to {status_data.status}."
+    )
 
     db.add(notification)
 
@@ -493,3 +548,207 @@ def get_ranked_job_applications(
     )
 
     return results
+@router.get(
+    "/job/{job_id}/ranked/filter",
+    response_model=list[RecruiterApplicationResponse]
+)
+def get_filtered_ranked_applications(
+    job_id: int,
+    min_score: int = Query(default=0, ge=0, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    job = (
+        db.query(Job)
+        .filter(
+            Job.id == job_id,
+            Job.recruiter_id == current_user.id
+        )
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found or you are not the recruiter of this job"
+        )
+
+    applications = (
+        db.query(Application)
+        .filter(Application.job_id == job_id)
+        .all()
+    )
+
+    results = []
+
+    for application in applications:
+        resume = application.resume
+
+        if not resume or not resume.extracted_text:
+            continue
+
+        match_result = calculate_match(
+            resume.extracted_text,
+            job.required_skills or ""
+        )
+
+        score = match_result["match_score"]
+
+        if score < min_score:
+            continue
+
+        if score >= 80:
+            recommendation = "Strong Match"
+        elif score >= 60:
+            recommendation = "Good Match"
+        elif score >= 40:
+            recommendation = "Partial Match"
+        else:
+            recommendation = "Low Match"
+
+        results.append({
+            "application_id": application.id,
+            "applicant_id": application.applicant_id,
+            "resume_id": application.resume_id,
+            "resume_filename": resume.filename,
+            "status": application.status,
+            "applied_at": application.applied_at,
+            "match_score": score,
+            "matched_skills": match_result["matched_skills"],
+            "missing_skills": match_result["missing_skills"],
+            "recommendation": recommendation
+        })
+
+    results.sort(
+        key=lambda application: application["match_score"],
+        reverse=True
+    )
+
+    return results
+@router.get(
+    "/{application_id}/history",
+    response_model=list[ApplicationStatusHistoryResponse]
+)
+def get_application_status_history(
+    application_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    application = (
+        db.query(Application)
+        .filter(Application.id == application_id)
+        .first()
+    )
+
+    if not application:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found"
+        )
+
+    # Candidate can view their own application.
+    # Recruiter can view applications belonging to their job.
+    is_candidate = (
+        application.applicant_id == current_user.id
+    )
+
+    job = (
+        db.query(Job)
+        .filter(
+            Job.id == application.job_id,
+            Job.recruiter_id == current_user.id
+        )
+        .first()
+    )
+
+    is_recruiter = job is not None
+
+    if not is_candidate and not is_recruiter:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to view this application history"
+        )
+
+    history = (
+        db.query(ApplicationStatusHistory)
+        .filter(
+            ApplicationStatusHistory.application_id == application_id
+        )
+        .order_by(
+            ApplicationStatusHistory.changed_at.asc()
+        )
+        .all()
+    )
+
+    return history
+@router.get(
+    "/{application_id}/timeline",
+    response_model=list[ApplicationTimelineEvent]
+)
+def get_application_timeline(
+    application_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    application = (
+        db.query(Application)
+        .filter(Application.id == application_id)
+        .first()
+    )
+
+    if not application:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found"
+        )
+
+    # Candidate can view their own application
+    is_candidate = (
+        application.applicant_id == current_user.id
+    )
+
+    # Recruiter can view applications for their own job
+    job = (
+        db.query(Job)
+        .filter(
+            Job.id == application.job_id,
+            Job.recruiter_id == current_user.id
+        )
+        .first()
+    )
+
+    is_recruiter = job is not None
+
+    if not is_candidate and not is_recruiter:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to view this application timeline"
+        )
+
+    timeline = [
+        {
+            "event": "Application submitted",
+            "status": "applied",
+            "timestamp": application.applied_at
+        }
+    ]
+
+    history = (
+        db.query(ApplicationStatusHistory)
+        .filter(
+            ApplicationStatusHistory.application_id == application_id
+        )
+        .order_by(
+            ApplicationStatusHistory.changed_at.asc()
+        )
+        .all()
+    )
+
+    for item in history:
+        timeline.append({
+            "event": f"Application status changed to {item.new_status}",
+            "status": item.new_status,
+            "timestamp": item.changed_at
+        })
+
+    return timeline

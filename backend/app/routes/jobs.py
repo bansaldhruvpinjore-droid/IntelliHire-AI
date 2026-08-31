@@ -216,6 +216,8 @@ def get_recommended_jobs(
         )
 
         score = match_result["match_score"]
+        if score < 40:
+            continue
 
         if score >= 80:
             recommendation = "Strong Match"

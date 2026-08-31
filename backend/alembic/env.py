@@ -21,6 +21,7 @@ load_dotenv(
 from app.database import Base
 from app.models.user import User
 from app.models.notification import Notification
+from app.models.application_status_history import ApplicationStatusHistory
 
 target_metadata = Base.metadata
 
