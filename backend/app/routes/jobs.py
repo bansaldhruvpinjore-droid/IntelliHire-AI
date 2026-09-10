@@ -63,7 +63,22 @@ def get_jobs(
     )
 
     return jobs
+@router.get(
+    "/mine",
+    response_model=list[JobResponse]
+)
+def get_my_jobs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    jobs = (
+        db.query(Job)
+        .filter(Job.recruiter_id == current_user.id)
+        .order_by(Job.id.desc())
+        .all()
+    )
 
+    return jobs
 
 @router.get(
     "/{job_id}/match/{resume_id}",
