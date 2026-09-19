@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import "./App.css";
 import API from "./api";
@@ -10,6 +11,7 @@ import RecruiterDashboard from "./RecruiterDashboard";
 import RecruiterApplications from "./RecruiterApplications";
 import CreateJob from "./CreateJob";
 import RecruiterJobs from "./RecruiterJobs";
+import Notifications from "./Notifications";
 
 function App() {
   const [isRegister, setIsRegister] = useState(false);
@@ -163,13 +165,13 @@ function App() {
 
       case "create-job":
         return <CreateJob />;
-      
+
       case "recruiter-jobs":
-       return (
-         <RecruiterJobs
-           onViewApplicants={openRecruiterApplications}
-         />
-       );
+        return (
+          <RecruiterJobs
+            onViewApplicants={openRecruiterApplications}
+          />
+        );
 
       case "dashboard":
       default:
@@ -181,7 +183,6 @@ function App() {
     return (
       <div className="app-shell">
         <header className="main-navbar">
-
           <div
             className="navbar-brand"
             onClick={() =>
@@ -192,9 +193,7 @@ function App() {
               )
             }
           >
-            <div className="brand-logo">
-              IH
-            </div>
+            <div className="brand-logo">IH</div>
 
             <div>
               <h2>IntelliHire AI</h2>
@@ -244,12 +243,12 @@ function App() {
                       ? "nav-link active"
                       : "nav-link"
                   }
-                  onClick={() =>
-                    setActivePage("applications")
-                  }
+                  onClick={() => setActivePage("applications")}
                 >
                   My Applications
                 </button>
+
+                <Notifications />
               </>
             ) : (
               <>
@@ -272,21 +271,18 @@ function App() {
                       ? "nav-link active"
                       : "nav-link"
                   }
-                  onClick={() =>
-                    setActivePage("create-job")
-                  }
+                  onClick={() => setActivePage("create-job")}
                 >
                   Create Job
                 </button>
+
                 <button
                   className={
                     activePage === "recruiter-jobs"
                       ? "nav-link active"
                       : "nav-link"
-                  } 
-                  onClick={() =>
-                    setActivePage("recruiter-jobs")
                   }
+                  onClick={() => setActivePage("recruiter-jobs")}
                 >
                   My Jobs
                 </button>
@@ -313,7 +309,6 @@ function App() {
           >
             Logout
           </button>
-
         </header>
 
         <main className="main-content">
@@ -326,7 +321,6 @@ function App() {
   return (
     <div className="app">
       <div className="auth-container">
-
         <div className="brand-section">
           <h1>IntelliHire AI</h1>
 
@@ -339,12 +333,9 @@ function App() {
         </div>
 
         <div className="auth-card">
-
           <div className="auth-header">
             <h2>
-              {isRegister
-                ? "Create Account"
-                : "Welcome Back"}
+              {isRegister ? "Create Account" : "Welcome Back"}
             </h2>
 
             <p>
@@ -355,77 +346,55 @@ function App() {
           </div>
 
           <form onSubmit={handleSubmit}>
-
             {isRegister && (
               <div className="form-group">
-
                 <label>Name</label>
 
                 <input
                   type="text"
                   placeholder="Enter your name"
                   value={name}
-                  onChange={(e) =>
-                    setName(e.target.value)
-                  }
+                  onChange={(e) => setName(e.target.value)}
                   required
                 />
-
               </div>
             )}
 
             <div className="form-group">
-
               <label>Email</label>
 
               <input
                 type="email"
                 placeholder="Enter your email"
                 value={email}
-                onChange={(e) =>
-                  setEmail(e.target.value)
-                }
+                onChange={(e) => setEmail(e.target.value)}
                 required
               />
-
             </div>
 
             <div className="form-group">
-
               <label>Password</label>
 
               <input
                 type="password"
                 placeholder="Enter your password"
                 value={password}
-                onChange={(e) =>
-                  setPassword(e.target.value)
-                }
+                onChange={(e) => setPassword(e.target.value)}
                 required
               />
-
             </div>
 
             {isRegister && (
               <div className="form-group">
-
                 <label>Role</label>
 
                 <select
                   value={role}
-                  onChange={(e) =>
-                    setRole(e.target.value)
-                  }
+                  onChange={(e) => setRole(e.target.value)}
                 >
-                  <option value="candidate">
-                    Candidate
-                  </option>
-
-                  <option value="recruiter">
-                    Recruiter
-                  </option>
+                  <option value="candidate">Candidate</option>
+                  <option value="recruiter">Recruiter</option>
                 </select>
-
               </div>
             )}
 
@@ -440,23 +409,17 @@ function App() {
                 ? "Create Account"
                 : "Login"}
             </button>
-
           </form>
 
           {message && (
-            <div className="success-message">
-              {message}
-            </div>
+            <div className="success-message">{message}</div>
           )}
 
           {error && (
-            <div className="error-message">
-              {error}
-            </div>
+            <div className="error-message">{error}</div>
           )}
 
           <div className="switch-auth">
-
             <span>
               {isRegister
                 ? "Already have an account?"
@@ -468,13 +431,9 @@ function App() {
               onClick={switchMode}
               type="button"
             >
-              {isRegister
-                ? "Login"
-                : "Create account"}
+              {isRegister ? "Login" : "Create account"}
             </button>
-
           </div>
-
         </div>
       </div>
     </div>
