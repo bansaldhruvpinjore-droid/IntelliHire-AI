@@ -9,6 +9,7 @@ from ..services.auth import (
     verify_password,
     create_access_token
 )
+from ..services.security import get_current_user
 
 
 router = APIRouter(
@@ -104,5 +105,12 @@ def login_user(
 
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "role": user.role
     }
+
+
+__all__ = [
+    "router",
+    "get_current_user"
+]

@@ -7,14 +7,14 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 
 # --------------------------------------------------
-# 1. Find the IntelliHire-AI project directory
+# 1. Find the backend directory
 # --------------------------------------------------
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 # --------------------------------------------------
-# 2. Load environment variables from .env
+# 2. Load environment variables from backend/.env
 # --------------------------------------------------
 
 load_dotenv(BASE_DIR / ".env")

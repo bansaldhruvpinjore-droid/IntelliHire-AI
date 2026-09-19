@@ -1,45 +1,49 @@
-from fastapi import APIRouter, Depends, HTTPException,Query
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models.job import Job
-from ..models.resume import Resume
-from ..models.user import User
-from ..schemas.job import (
+from app.database import get_db
+from app.models.job import Job
+from app.models.resume import Resume
+from app.models.user import User
+from app.schemas.job import (
     JobCreate,
-    JobResponse,
     JobMatchResponse,
-    JobRecommendationResponse
+    JobRecommendationResponse,
+    JobResponse,
 )
-from ..services.security import get_current_user, require_role
-from ..services.job_matcher import calculate_match
+from app.routes.auth import get_current_user
+from app.services.job_matcher import calculate_match
 
 
 router = APIRouter(
     prefix="/jobs",
-    tags=["Jobs"]
+    tags=["Jobs"],
 )
 
 
-@router.post(
-    "/",
-    response_model=JobResponse,
-    dependencies=[Depends(require_role("recruiter"))]
-)
+@router.post("/", response_model=JobResponse)
 def create_job(
     job_data: JobCreate,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
+    if current_user.role != "recruiter":
+        raise HTTPException(
+            status_code=403,
+            detail="Only recruiters can create jobs.",
+        )
+
     job = Job(
-        recruiter_id=current_user.id,
         title=job_data.title,
         company=job_data.company,
         location=job_data.location,
         experience=job_data.experience,
         salary=job_data.salary,
         description=job_data.description,
-        required_skills=job_data.required_skills
+        required_skills=job_data.required_skills,
+        recruiter_id=current_user.id,
     )
 
     db.add(job)
@@ -49,100 +53,110 @@ def create_job(
     return job
 
 
-@router.get(
-    "/",
-    response_model=list[JobResponse]
-)
+@router.get("/", response_model=list[JobResponse])
 def get_jobs(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    jobs = (
+    return (
         db.query(Job)
         .order_by(Job.id.desc())
         .all()
     )
 
-    return jobs
-@router.get(
-    "/mine",
-    response_model=list[JobResponse]
-)
-def get_my_jobs(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+
+@router.get("/search", response_model=list[JobResponse])
+def search_jobs(
+    query: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ):
-    jobs = (
+    jobs_query = db.query(Job)
+
+    if query:
+        search_text = f"%{query}%"
+
+        jobs_query = jobs_query.filter(
+            Job.title.ilike(search_text)
+            | Job.company.ilike(search_text)
+            | Job.description.ilike(search_text)
+            | Job.required_skills.ilike(search_text)
+        )
+
+    if location:
+        jobs_query = jobs_query.filter(
+            Job.location.ilike(f"%{location}%")
+        )
+
+    return (
+        jobs_query
+        .order_by(Job.id.desc())
+        .all()
+    )
+
+
+@router.get("/mine", response_model=list[JobResponse])
+def get_my_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "recruiter":
+        raise HTTPException(
+            status_code=403,
+            detail="Only recruiters can access their jobs.",
+        )
+
+    return (
         db.query(Job)
         .filter(Job.recruiter_id == current_user.id)
         .order_by(Job.id.desc())
         .all()
     )
 
-    return jobs
 
 @router.get(
     "/{job_id}/match/{resume_id}",
-    response_model=JobMatchResponse
+    response_model=JobMatchResponse,
 )
-def match_resume_to_job(
+def match_resume_with_job(
     job_id: int,
     resume_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
-    # Find the job
     job = (
         db.query(Job)
         .filter(Job.id == job_id)
         .first()
     )
 
-    if job is None:
+    if not job:
         raise HTTPException(
             status_code=404,
-            detail="Job not found"
+            detail="Job not found.",
         )
 
-    # Find the resume belonging to the current user
     resume = (
         db.query(Resume)
-        .filter(
-            Resume.id == resume_id,
-            Resume.user_id == current_user.id
-        )
+        .filter(Resume.id == resume_id)
         .first()
     )
 
-    if resume is None:
+    if not resume:
         raise HTTPException(
             status_code=404,
-            detail="Resume not found"
+            detail="Resume not found.",
         )
 
-    # Make sure resume text exists
-    if not resume.extracted_text:
+    if resume.user_id != current_user.id:
         raise HTTPException(
-            status_code=400,
-            detail="Resume text has not been extracted"
+            status_code=403,
+            detail="You can only analyze your own resume.",
         )
 
-    # Calculate match
     result = calculate_match(
-        resume.extracted_text,
-        job.required_skills or ""
+        resume_text=resume.extracted_text or "",
+        required_skills=job.required_skills or "",
     )
-
-    # Generate recommendation
-    score = result["match_score"]
-
-    if score >= 80:
-        recommendation = "Strong Match"
-    elif score >= 60:
-        recommendation = "Good Match"
-    elif score >= 40:
-        recommendation = "Partial Match"
-    else:
-        recommendation = "Low Match"
 
     return {
         "resume_id": resume.id,
@@ -150,70 +164,35 @@ def match_resume_to_job(
         "job_id": job.id,
         "job_title": job.title,
         "company": job.company,
-        "match_score": score,
-        "matched_skills": result["matched_skills"],
-        "missing_skills": result["missing_skills"],
-        "recommendation": recommendation
+        **result,
     }
-@router.get(
-    "/search",
-    response_model=list[JobResponse]
-)
-def search_jobs(
-    keyword: str | None = Query(default=None),
-    location: str | None = Query(default=None),
-    db: Session = Depends(get_db)
-):
-    query = db.query(Job)
 
-    if keyword:
-        search_term = f"%{keyword}%"
 
-        query = query.filter(
-            (Job.title.ilike(search_term)) |
-            (Job.company.ilike(search_term)) |
-            (Job.description.ilike(search_term)) |
-            (Job.required_skills.ilike(search_term))
-        )
-
-    if location:
-        query = query.filter(
-            Job.location.ilike(f"%{location}%")
-        )
-
-    return (
-        query
-        .order_by(Job.id.desc())
-        .all()
-    )
 @router.get(
     "/recommended/{resume_id}",
-    response_model=list[JobRecommendationResponse]
+    response_model=list[JobRecommendationResponse],
 )
 def get_recommended_jobs(
     resume_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     resume = (
         db.query(Resume)
-        .filter(
-            Resume.id == resume_id,
-            Resume.user_id == current_user.id
-        )
+        .filter(Resume.id == resume_id)
         .first()
     )
 
     if not resume:
         raise HTTPException(
             status_code=404,
-            detail="Resume not found"
+            detail="Resume not found.",
         )
 
-    if not resume.extracted_text:
+    if resume.user_id != current_user.id:
         raise HTTPException(
-            status_code=400,
-            detail="Resume text has not been extracted"
+            status_code=403,
+            detail="You can only get recommendations for your own resume.",
         )
 
     jobs = (
@@ -225,38 +204,27 @@ def get_recommended_jobs(
     recommendations = []
 
     for job in jobs:
-        match_result = calculate_match(
-            resume.extracted_text,
-            job.required_skills or ""
+        result = calculate_match(
+            resume_text=resume.extracted_text or "",
+            required_skills=job.required_skills or "",
         )
 
-        score = match_result["match_score"]
-        if score < 40:
-            continue
-
-        if score >= 80:
-            recommendation = "Strong Match"
-        elif score >= 60:
-            recommendation = "Good Match"
-        elif score >= 40:
-            recommendation = "Partial Match"
-        else:
-            recommendation = "Low Match"
-
-        recommendations.append({
-            "job_id": job.id,
-            "title": job.title,
-            "company": job.company,
-            "location": job.location,
-            "match_score": score,
-            "matched_skills": match_result["matched_skills"],
-            "missing_skills": match_result["missing_skills"],
-            "recommendation": recommendation
-        })
+        recommendations.append(
+            {
+                "job_id": job.id,
+                "job_title": job.title,
+                "company": job.company,
+                "location": job.location,
+                "match_score": result["match_score"],
+                "matched_skills": result["matched_skills"],
+                "missing_skills": result["missing_skills"],
+                "recommendation": result["recommendation"],
+            }
+        )
 
     recommendations.sort(
-        key=lambda job: job["match_score"],
-        reverse=True
+        key=lambda item: item["match_score"],
+        reverse=True,
     )
 
     return recommendations

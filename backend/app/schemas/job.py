@@ -1,5 +1,6 @@
+from typing import List, Optional
+
 from pydantic import BaseModel
-from typing import Optional
 
 
 class JobCreate(BaseModel):
@@ -14,7 +15,6 @@ class JobCreate(BaseModel):
 
 class JobResponse(BaseModel):
     id: int
-    recruiter_id: int
     title: str
     company: str
     location: str
@@ -22,6 +22,7 @@ class JobResponse(BaseModel):
     salary: Optional[str] = None
     description: str
     required_skills: Optional[str] = None
+    recruiter_id: int
 
     class Config:
         from_attributes = True
@@ -37,17 +38,28 @@ class JobMatchResponse(BaseModel):
 
     match_score: int
 
-    matched_skills: list[str]
-    missing_skills: list[str]
+    matched_skills: List[str]
+    missing_skills: List[str]
+
+    exact_matches: List[str]
+    related_matches: List[str]
+
+    exact_match_count: int
+    related_match_count: int
+    missing_match_count: int
+
+    total_required_skills: int
+    skill_coverage: int
 
     recommendation: str
+
+
 class JobRecommendationResponse(BaseModel):
     job_id: int
-    title: str
+    job_title: str
     company: str
     location: str
-
     match_score: int
-    matched_skills: list[str]
-    missing_skills: list[str]
+    matched_skills: List[str]
+    missing_skills: List[str]
     recommendation: str

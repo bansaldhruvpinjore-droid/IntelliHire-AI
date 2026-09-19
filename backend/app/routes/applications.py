@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException,Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,7 +22,6 @@ from app.schemas.application import (
 )
 from app.services.job_matcher import calculate_match
 from app.services.security import get_current_user
-
 
 
 router = APIRouter(
@@ -94,6 +93,8 @@ def apply_to_job(
     db.refresh(new_application)
 
     return new_application
+
+
 @router.get(
     "/job/{job_id}",
     response_model=list[RecruiterApplicationResponse]
@@ -180,6 +181,8 @@ def get_job_applications(
     )
 
     return results
+
+
 @router.get(
     "/my",
     response_model=list[MyApplicationResponse]
@@ -205,20 +208,19 @@ def get_my_applications(
 
         results.append({
             "application_id": application.id,
-
             "job_id": application.job_id,
             "job_title": job.title,
             "company": job.company,
             "location": job.location,
-
             "resume_id": application.resume_id,
             "resume_filename": resume.filename,
-
             "status": application.status,
             "applied_at": application.applied_at
         })
 
     return results
+
+
 @router.get(
     "/candidate-dashboard",
     response_model=CandidateDashboardResponse
@@ -265,6 +267,8 @@ def get_candidate_dashboard(
         "rejected": status_counts["rejected"],
         "unread_notifications": unread_notifications
     }
+
+
 @router.patch(
     "/{application_id}/status",
     response_model=ApplicationResponse
@@ -328,6 +332,7 @@ def update_application_status(
     )
 
     db.add(history)
+
     notification = Notification(
         user_id=application.applicant_id,
         application_id=application.id,
@@ -342,6 +347,8 @@ def update_application_status(
     db.refresh(application)
 
     return application
+
+
 @router.get(
     "/dashboard",
     response_model=RecruiterDashboardResponse
@@ -396,6 +403,8 @@ def get_recruiter_dashboard(
         "selected": status_counts["selected"],
         "rejected": status_counts["rejected"]
     }
+
+
 @router.get(
     "/analytics/match",
     response_model=RecruiterMatchAnalyticsResponse
@@ -463,6 +472,46 @@ def get_match_analytics(
         "partial_matches": partial_matches,
         "low_matches": low_matches
     }
+
+
+@router.get(
+    "/job-analytics"
+)
+def get_job_application_analytics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    jobs = (
+        db.query(Job)
+        .filter(
+            Job.recruiter_id == current_user.id
+        )
+        .order_by(Job.id.desc())
+        .all()
+    )
+
+    results = []
+
+    for job in jobs:
+        application_count = (
+            db.query(Application)
+            .filter(
+                Application.job_id == job.id
+            )
+            .count()
+        )
+
+        results.append({
+            "job_id": job.id,
+            "job_title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "application_count": application_count
+        })
+
+    return results
+
+
 @router.get(
     "/job/{job_id}/ranked",
     response_model=list[RecruiterApplicationResponse]
@@ -548,6 +597,8 @@ def get_ranked_job_applications(
     )
 
     return results
+
+
 @router.get(
     "/job/{job_id}/ranked/filter",
     response_model=list[RecruiterApplicationResponse]
@@ -625,6 +676,8 @@ def get_filtered_ranked_applications(
     )
 
     return results
+
+
 @router.get(
     "/{application_id}/history",
     response_model=list[ApplicationStatusHistoryResponse]
@@ -681,6 +734,8 @@ def get_application_status_history(
     )
 
     return history
+
+
 @router.get(
     "/{application_id}/timeline",
     response_model=list[ApplicationTimelineEvent]
@@ -752,3 +807,58 @@ def get_application_timeline(
         })
 
     return timeline
+@router.get(
+    "/job-analytics/{job_id}"
+)
+def get_single_job_application_analytics(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    job = (
+        db.query(Job)
+        .filter(
+            Job.id == job_id,
+            Job.recruiter_id == current_user.id
+        )
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found or you are not the recruiter of this job"
+        )
+
+    applications = (
+        db.query(Application)
+        .filter(
+            Application.job_id == job_id
+        )
+        .all()
+    )
+
+    status_counts = {
+        "applied": 0,
+        "shortlisted": 0,
+        "interview": 0,
+        "selected": 0,
+        "rejected": 0
+    }
+
+    for application in applications:
+        if application.status in status_counts:
+            status_counts[application.status] += 1
+
+    return {
+        "job_id": job.id,
+        "job_title": job.title,
+        "company": job.company,
+        "location": job.location,
+        "total_applications": len(applications),
+        "applied": status_counts["applied"],
+        "shortlisted": status_counts["shortlisted"],
+        "interview": status_counts["interview"],
+        "selected": status_counts["selected"],
+        "rejected": status_counts["rejected"]
+    }

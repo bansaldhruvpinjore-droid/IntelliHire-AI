@@ -1,15 +1,18 @@
+import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models.resume import Resume
-from ..models.user import User
-from ..services.security import get_current_user
-from ..services.resume_extractor import extract_resume_text
-from ..schemas.resume import ResumeAnalysisResponse
-from ..services.resume_analyzer import analyze_resume
+from app.database import get_db
+from app.models.resume import Resume
+from app.models.application import Application
+from app.models.job import Job
+from app.models.user import User
+from app.routes.auth import get_current_user
+from app.services.resume_analyzer import analyze_resume
+
 
 router = APIRouter(
     prefix="/resumes",
@@ -17,52 +20,36 @@ router = APIRouter(
 )
 
 
-UPLOAD_DIR = Path("uploads/resumes")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
 @router.post("/upload")
-async def upload_resume(
-    file: UploadFile = File(...),
+def upload_resume(
+    filename: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    allowed_extensions = {".pdf", ".docx"}
+    upload_dir = Path("uploads/resumes")
+    upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_extension = Path(file.filename).suffix.lower()
+    file_path = upload_dir / filename
 
-    if file_extension not in allowed_extensions:
+    if not file_path.exists():
         raise HTTPException(
-            status_code=400,
-            detail="Only PDF and DOCX files are allowed"
+            status_code=404,
+            detail="Resume file not found."
         )
-
-    file_path = UPLOAD_DIR / f"{current_user.id}_{file.filename}"
-
-    file_content = await file.read()
-
-    with open(file_path, "wb") as buffer:
-        buffer.write(file_content)
-
-    extracted_text = extract_resume_text(str(file_path))
 
     resume = Resume(
         user_id=current_user.id,
-        filename=file.filename,
-        file_path=str(file_path),
-        extracted_text=extracted_text
+        filename=filename,
+        file_path=str(file_path)
     )
 
     db.add(resume)
     db.commit()
     db.refresh(resume)
 
-    return {
-        "message": "Resume uploaded successfully",
-        "resume_id": resume.id,
-        "filename": resume.filename,
-        "file_path": resume.file_path
-    }
+    return resume
+
+
 @router.get("/")
 def get_my_resumes(
     current_user: User = Depends(get_current_user),
@@ -75,17 +62,10 @@ def get_my_resumes(
         .all()
     )
 
-    return [
-        {
-            "id": resume.id,
-            "filename": resume.filename
-        }
-        for resume in resumes
-    ]
-@router.get(
-    "/{resume_id}/analysis",
-    response_model=ResumeAnalysisResponse
-)
+    return resumes
+
+
+@router.get("/{resume_id}/analysis")
 def get_resume_analysis(
     resume_id: int,
     current_user: User = Depends(get_current_user),
@@ -100,22 +80,111 @@ def get_resume_analysis(
         .first()
     )
 
-    if resume is None:
+    if not resume:
         raise HTTPException(
             status_code=404,
-            detail="Resume not found"
+            detail="Resume not found."
         )
 
-    if not resume.extracted_text:
+    if not resume.file_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume file path is not available."
+        )
+
+    file_path = Path(resume.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Resume file not found."
+        )
+
+    try:
+        analysis = analyze_resume(str(file_path))
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Resume analysis failed: {str(error)}"
+        )
+
+    return analysis
+
+
+@router.get("/{resume_id}/file")
+def view_resume_file(
+    resume_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Securely return a resume PDF to an authorized user.
+
+    Candidates can access their own resumes.
+
+    Recruiters can access a resume when that resume was
+    submitted with an application to one of the recruiter's jobs.
+    """
+
+    resume = (
+        db.query(Resume)
+        .filter(Resume.id == resume_id)
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume not found."
+        )
+
+    # Candidate owns the resume.
+    if resume.user_id == current_user.id:
+        authorized = True
+
+    else:
+        # Recruiter authorization:
+        # The resume must belong to an application for
+        # a job owned by the current recruiter.
+        authorized = (
+            db.query(Application)
+            .join(Job, Application.job_id == Job.id)
+            .filter(
+                Application.resume_id == resume_id,
+                Job.recruiter_id == current_user.id
+            )
+            .first()
+            is not None
+        )
+
+    if not authorized:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to access this resume."
+        )
+
+    if not resume.file_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume file path is not available."
+        )
+
+    file_path = Path(resume.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Resume file not found."
+        )
+
+    if file_path.suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=400,
-            detail="Resume text has not been extracted yet"
+            detail="Only PDF resume files are supported."
         )
 
-    analysis = analyze_resume(resume.extracted_text)
-
-    return {
-        "resume_id": resume.id,
-        "filename": resume.filename,
-        **analysis
-    }
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        filename=file_path.name
+    )
